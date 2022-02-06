@@ -1,6 +1,7 @@
 import numpy as np
 from sortings import radix_argsort, bucket_argsort, quick_argsort
 from random_bits import get_random_numbers, cxor
+from zp import invert_in_Zp_Euclidean, invert_in_Zp_Ferma
 
 def argsort(s):
     return sorted(range(len(s)), key=s.__getitem__)
@@ -32,3 +33,6 @@ print('quick sort is correct:', quick_works)
 
 print('\nRandom uints:', get_random_numbers(4))
 print('\nCXOR(1111, 0101) == 1010:', cxor(1 + 2 + 4 + 8, 1 + 4) == 2 + 8)
+
+print('Invert(Eucl) 1/13 in Z19:', invert_in_Zp_Euclidean(19, 13))
+print('Invert(Ferma) 1/13 in Z19:', invert_in_Zp_Ferma(19, 13))

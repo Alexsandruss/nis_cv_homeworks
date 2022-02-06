@@ -5,10 +5,17 @@
 #include <iostream>
 #include <cmath>
 #include <climits>
+#include <mkl.h>
 
 using namespace std;
 
 typedef long long unsigned int uint64;
+
+void swapKeysAndValues(vector<uint64>& a, vector<uint64>& k, const uint64 i, const uint j)
+{
+    swap(a[i], a[j]);
+    swap(k[i], k[j]);
+}
 
 // a - values, k - indices
 pair<vector<uint64>, vector<uint64>> bubbleSort(const vector<uint64>& a, const vector<uint64>& k)
@@ -74,30 +81,28 @@ pair<vector<uint64>, vector<uint64>> countingSort(const vector<uint64>& a, const
     );
 }
 
+pair<vector<uint64>, vector<uint64>> sortOnBitMask(const vector<uint64>& a, const vector<uint64>& k, unsigned int bitShift)
+{
+    const uint64 mask = 0x000000000000ffffULL;
+    vector<uint64> x;
+    for (uint64 i = 0; i < a.size(); ++i)
+        x.push_back(((a[k[i]]) >> bitShift) & mask);
+    return countingSort(x, k);
+}
+
 vector<uint64> radixArgSort(const vector<uint64>& a)
 {
-    uint64 n = a.size();
     vector<uint64> idx;
-    for (uint64 i = 0; i < n; ++i)
+    for (uint64 i = 0; i < a.size(); ++i)
         idx.push_back(i);
-    vector<uint64> x0, x1, x2, x3;
     // sort by forth 16 bits
-    uint64 mask = 0x000000000000ffffULL;
-    for (uint64 i = 0; i < n; ++i)
-        x3.push_back(a[i] & mask);
-    auto p3 = countingSort(x3, idx);
+    auto p3 = sortOnBitMask(a, idx, 0);
     // sort by third 16 bits
-    for (uint64 i = 0; i < n; ++i)
-        x2.push_back(((a[get<0>(p3)[i]]) >> 16) & mask);
-    auto p2 = countingSort(x2, get<0>(p3));
+    auto p2 = sortOnBitMask(a, get<0>(p3), 16);
     // sort by second 16 bits
-    for (uint64 i = 0; i < n; ++i)
-        x1.push_back(((a[get<0>(p2)[i]]) >> 32) & mask);
-    auto p1 = countingSort(x1, get<0>(p2));
+    auto p1 = sortOnBitMask(a, get<0>(p2), 32);
     // sort by first 16 bits
-    for (uint64 i = 0; i < n; ++i)
-        x0.push_back(((a[get<0>(p1)[i]]) >> 48) & mask);
-    auto p0 = countingSort(x0, get<0>(p1));
+    auto p0 = sortOnBitMask(a, get<0>(p1), 48);
     return get<0>(p0);
 }
 
@@ -136,30 +141,86 @@ vector<uint64> bucketArgSort(const vector<uint64>& a)
     return r;
 }
 
-long int partition(vector<uint64>& a, vector<uint64>& k, long int start, long int end)
+void insertionSort(vector<uint64>& a, vector<uint64>& k, int start, int end)
 {
-    uint64 p = a[end];
-    long int s = start - 1;
-    for (long int i = start; i < end; ++i)
-        if (a[i] <= p)
+    for (int i = start; i <= end; ++i)
+    {
+        uint64 x = a[i];
+        uint64 kx = k[i];
+        int j = i - 1;
+        while (j >= 0 && a[j] > x)
         {
-            s++;
-            swap(a[s], a[i]);
-            swap(k[s], k[i]);
+            a[j + 1] = a[j];
+            k[j + 1] = k[j];
+            --j;
         }
-    swap(a[s + 1], a[end]);
-    swap(k[s + 1], k[end]);
-    return s + 1;
+        a[j + 1] = x;
+        k[j + 1] = kx;
+    }
 }
 
-void quickSort(vector<uint64>& a, vector<uint64>& k, long int start, long int end)
+uint64 generateSwapIndex(uint64 i, VSLStreamStatePtr & stream)
 {
-    if (start < end)
+    uint64 bitMask = i;
+    for (int p = 1; p <= 64; p *= 2)
+        bitMask |= bitMask >> p;
+
+    uint64 r = i + 1;
+    while (r > i)
     {
-        long int i = partition(a, k, start, end);
-        quickSort(a, k, start, i - 1);
-        quickSort(a, k, i + 1, end);
+        viRngUniformBits64(VSL_RNG_METHOD_UNIFORMBITS64_STD, stream, 1, &r);
+        r = r & bitMask;
     }
+
+    return r;
+}
+
+void shuffle(vector<uint64>& a, vector<uint64>& k)
+{
+    uint64 n = a.size();
+    VSLStreamStatePtr rngStream;
+    vslNewStream(&rngStream, VSL_BRNG_MT19937, 42);
+    for (uint64 i = n - 1; i > 0; --i)
+    {
+        uint64 j = generateSwapIndex(i, rngStream);
+        swapKeysAndValues(a, k, i, j);
+    }
+}
+
+uint64 partition(vector<uint64>& a, vector<uint64>& k, int start, int end)
+{
+    uint64 c = a[end];
+    int i = start;
+
+    for (int j = start; j < end; ++j)
+        if (a[j] <= c)
+        {
+            swapKeysAndValues(a, k, i, j);
+            ++i;
+        }
+
+    swapKeysAndValues(a, k, i, end);
+    return i;
+}
+
+void quickSort(vector<uint64>& a, vector<uint64>& k, int start, int end)
+{
+    const int limit = 32;
+    while (end - start >= limit)
+    {
+        int pivot = partition(a, k, start, end);
+        if (pivot - start <= end - pivot - 1)
+        {
+            quickSort(a, k, start, pivot - 1);
+            start = pivot + 1;
+        }
+        else
+        {
+            quickSort(a, k, pivot + 1, end);
+            end = pivot - 1;
+        }
+    }
+    insertionSort(a, k, start, end);
 }
 
 vector<uint64> quickArgSort(const vector<uint64>& a)
@@ -171,7 +232,8 @@ vector<uint64> quickArgSort(const vector<uint64>& a)
         idx.push_back(i);
     }
 
-    quickSort(val, idx, 0, a.size() - 1);
+    shuffle(val, idx);
+    quickSort(val, idx, 0, val.size() - 1);
 
     return idx;
 }
